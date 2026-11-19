@@ -28,3 +28,9 @@ use the editor.
   own key and store it in Secrets.
 - **Secrets.** Lovable manages them. Do not put secret values in the repo.
 <!-- LOVABLE:END -->
+
+## Project rules
+- Students sign in with Cloud Auth (email or roll number + password); a trigger on signup creates their `students` row and `roll_no`/`user_id`/`email` are unique. Server functions receive the access token and verify it via `currentStudent` in `ss.server.ts`. Admin keeps its own `sessions` token + `ADMIN_PASSWORD`.
+- All tables are service-role only (RLS on, no policies); browser code never queries the database directly — only via `src/lib/studyspace.functions.ts`, which loads `ss.server.ts` inside handlers.
+- Booking integrity lives in SQL (`book_seat`, partial unique indexes); keep conflict handling there so concurrent taps stay safe.
+- Pure status/sort rules live in `src/lib/availability.ts` with tests in `src/test/availability.test.ts`.
