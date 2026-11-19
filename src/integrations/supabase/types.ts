@@ -82,6 +82,27 @@ export type Database = {
           },
         ]
       }
+      feedback: {
+        Row: {
+          created_at: string
+          id: number
+          message: string
+          page: string
+        }
+        Insert: {
+          created_at?: string
+          id?: never
+          message: string
+          page?: string
+        }
+        Update: {
+          created_at?: string
+          id?: never
+          message?: string
+          page?: string
+        }
+        Relationships: []
+      }
       periods: {
         Row: {
           end_time: string

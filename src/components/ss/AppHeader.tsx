@@ -3,7 +3,7 @@ import { BookOpen, LogOut, ListChecks } from "lucide-react";
 import { signOut } from "@/lib/session";
 import { useQueryClient } from "@tanstack/react-query";
 
-export function AppHeader({ subtitle = "Find a quiet space", showNav = true }: { subtitle?: string; showNav?: boolean }) {
+export function AppHeader({ subtitle = "Find a quiet space", showNav = true, signedIn = true }: { subtitle?: string; showNav?: boolean; signedIn?: boolean }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   return (
@@ -18,7 +18,12 @@ export function AppHeader({ subtitle = "Find a quiet space", showNav = true }: {
             <span className="block text-sm opacity-80">{subtitle}</span>
           </span>
         </Link>
-        {showNav && (
+        {showNav && !signedIn && (
+          <nav className="flex items-center gap-2">
+            <Link to="/login" className="inline-flex h-11 items-center rounded-xl bg-accent px-4 font-semibold text-accent-foreground focus-visible:outline-2 focus-visible:outline-ring">Log in</Link>
+          </nav>
+        )}
+        {showNav && signedIn && (
           <nav className="flex items-center gap-1">
             <Link to="/my-bookings" className="grid h-12 w-12 place-items-center rounded-xl hover:bg-primary-foreground/10 focus-visible:outline-2 focus-visible:outline-ring" aria-label="My bookings">
               <ListChecks className="h-5 w-5" aria-hidden="true" />

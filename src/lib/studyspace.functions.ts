@@ -1,6 +1,6 @@
 // Server functions (the StudySpace API). Every response is { data } or { error: { code, message } }.
 import { createServerFn } from "@tanstack/react-start";
-import { buildAvailability, normalizeRoll, type RawRoom, type RoomAvailability } from "./availability";
+import { bookableRooms, buildAvailability, cleanFeedback, normalizeRoll, pickSuggestion, type RawRoom, type RoomAvailability } from "./availability";
 
 export type Res<T> = { data?: T | undefined; error?: { code: string; message: string } | undefined };
 
@@ -80,17 +80,19 @@ export const getPeriodInfo = createServerFn({ method: "POST" }).handler(async ()
   try { return { data: await h.rpc<PeriodInfo>("current_period_info") }; } catch (e) { return h.fail(e); }
 });
 
+/** Public: anyone can see free rooms. With a valid token it also returns the student's active booking. */
 export const getAvailability = createServerFn({ method: "POST" })
-  .validator((d: { token: string; periodId?: number }) => d)
+  .validator((d: { token?: string | null; periodId?: number }) => d)
   .handler(async ({ data }): Promise<Res<{ info: PeriodInfo; periodId: number | null; rooms: RoomAvailability[]; myActive: BookingRow | null }>> => {
     const h = await import("./ss.server");
     try {
-      const studentId = await h.requireStudent(data.token);
+      const studentId = data.token ? await h.requireStudent(data.token) : null;
       await h.rpc("expire_bookings");
       const info = await h.rpc<PeriodInfo>("current_period_info");
       const periodId = data.periodId && isInt(data.periodId) ? data.periodId
         : info.current && !info.current.is_break ? info.current.id : info.next?.id ?? null;
       const rooms = periodId ? buildAvailability(await h.rpc<RawRoom[]>("get_availability", { p_period_id: periodId, p_date: info.today })) : [];
+      if (studentId === null) return { data: { info, periodId, rooms, myActive: null } };
       const { data: mine } = await h.db.from("bookings").select(BOOKING_SELECT).eq("student_id", studentId)
         .eq("date", info.today).eq("status", "active").order("created_at").limit(1);
       return { data: { info, periodId, rooms, myActive: (mine?.[0] as unknown as BookingRow) ?? null } };
@@ -164,7 +166,80 @@ export const myBookings = createServerFn({ method: "POST" })
     } catch (e) { return h.fail(e); }
   });
 
+// ---------- AI: Suggest a spot ----------
+export interface Suggestion { roomId: number; roomName: string; free: number; reason: string; fromAi: boolean }
+
+export const suggestSpot = createServerFn({ method: "POST" })
+  .validator((d: { periodId: number; wish?: string }) => ({ periodId: Number(d?.periodId), wish: String(d?.wish ?? "").replace(/[<>]/g, "").trim().slice(0, 150) }))
+  .handler(async ({ data }): Promise<Res<Suggestion | null>> => {
+    const h = await import("./ss.server");
+    try {
+      if (!isInt(data.periodId)) throw new h.AppError("INVALID_INPUT");
+      await h.rateLimit(`ai:${h.clientIp()}`, 6, 60);
+      const info = await h.rpc<PeriodInfo>("current_period_info");
+      const rooms = buildAvailability(await h.rpc<RawRoom[]>("get_availability", { p_period_id: data.periodId, p_date: info.today }));
+      const options = bookableRooms(rooms);
+      if (options.length === 0) return { data: null };
+      const list = options.map((r) => ({ id: r.id, name: r.name, type: r.type, where: r.location_note, free_seats: r.free, total_seats: r.total }));
+      let aiId: unknown = null;
+      let reason = "";
+      try {
+        const { generateResponse } = await import("@lovable.dev/ai-gateway");
+        const res = await generateResponse({
+          model: "openai/gpt-6.1-sol",
+          instructions: "You help school students pick a quiet place to study during a free period. Choose exactly one room from the list. Prefer libraries and rooms with many free seats (quieter, less crowded), and respect the student's wish if given. Reply with the room id and one short, friendly sentence (max 25 words) explaining why. Never invent rooms.",
+          input: [{ role: "user", content: `Free rooms this period (JSON): ${JSON.stringify(list)}\nStudent's wish: ${data.wish || "none"}\nReturn JSON.` }],
+          text: { format: { type: "json_schema", name: "suggestion", strict: true, schema: {
+            type: "object", additionalProperties: false, required: ["room_id", "reason"],
+            properties: { room_id: { type: "integer" }, reason: { type: "string" } },
+          } } },
+        });
+        const text = (res.output ?? []).flatMap((o) => (o.type === "message" ? o.content : []))
+          .map((c) => (c.type === "output_text" ? c.text : "")).join("");
+        const parsed = JSON.parse(text) as { room_id?: unknown; reason?: unknown };
+        aiId = parsed.room_id;
+        reason = String(parsed.reason ?? "").slice(0, 200);
+      } catch (e) {
+        console.error("[studyspace] suggestSpot AI failed", e);
+        throw new h.AppError("AI_UNAVAILABLE");
+      }
+      const pick = pickSuggestion(rooms, aiId)!;
+      return { data: {
+        roomId: pick.room.id, roomName: pick.room.name, free: pick.room.free, fromAi: pick.fromAi,
+        reason: pick.fromAi && reason ? reason : `${pick.room.name} has the most free seats right now.`,
+      } };
+    } catch (e) { return h.fail(e); }
+  });
+
+// ---------- Feedback (anonymous) ----------
+export const submitFeedback = createServerFn({ method: "POST" })
+  .validator((d: { message: string; page?: string }) => ({ message: String(d?.message ?? "").slice(0, 2000), page: String(d?.page ?? "").slice(0, 200) }))
+  .handler(async ({ data }): Promise<Res<{ ok: true }>> => {
+    const h = await import("./ss.server");
+    try {
+      const message = cleanFeedback(data.message);
+      if (!message) throw new h.AppError("FEEDBACK_EMPTY");
+      await h.rateLimit(`feedback:${h.clientIp()}`, 5, 300);
+      const { error } = await h.db.from("feedback").insert({ message, page: data.page.replace(/[^\w\-/$.]/g, "") });
+      if (error) throw new Error(error.message);
+      return { data: { ok: true } };
+    } catch (e) { return h.fail(e); }
+  });
+
 // ---------- Admin ----------
+export interface FeedbackRow { id: number; message: string; page: string; created_at: string }
+
+export const adminFeedback = createServerFn({ method: "POST" })
+  .validator((d: { token: string }) => d)
+  .handler(async ({ data }): Promise<Res<FeedbackRow[]>> => {
+    const h = await import("./ss.server");
+    try {
+      await h.requireAdmin(tok(data));
+      const { data: rows, error } = await h.db.from("feedback").select("id,message,page,created_at").order("created_at", { ascending: false }).limit(200);
+      if (error) throw new Error(error.message);
+      return { data: (rows ?? []) as FeedbackRow[] };
+    } catch (e) { return h.fail(e); }
+  });
 export interface AdminRoom { id: number; name: string; type: "classroom" | "library"; total_seats: number; location_note: string; is_active: boolean }
 export interface AdminBlock { id: number; room_id: number; period_id: number; weekday: number; reason: string }
 

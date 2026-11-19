@@ -11,7 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { hm } from "@/components/ss/Countdown";
 import {
-  adminAddBlock, adminCancelBooking, adminDeleteBlock, adminLogin, adminOverview, adminSavePeriods, adminSaveRoom,
+  adminAddBlock, adminCancelBooking, adminDeleteBlock, adminFeedback, adminLogin, adminOverview, adminSavePeriods, adminSaveRoom,
   type AdminRoom, type Period,
 } from "@/lib/studyspace.functions";
 import { errorText, getAdminToken, setAdminToken, unwrap } from "@/lib/session";
@@ -85,7 +85,7 @@ function Panel({ token, onLogout }: { token: string; onLogout: () => void }) {
         {!d ? (q.isError ? <p role="alert" className="text-full-strong">{errorText(q.error)}</p> : <Skeleton className="h-64 w-full rounded-2xl" />) : (
           <Tabs defaultValue="dashboard">
             <TabsList className="mb-4 flex h-auto w-full flex-wrap justify-start gap-1 rounded-xl bg-secondary p-1">
-              {["dashboard", "rooms", "timetable", "blocks", "bookings"].map((t) => (
+              {["dashboard", "rooms", "timetable", "blocks", "bookings", "feedback"].map((t) => (
                 <TabsTrigger key={t} value={t} className="h-10 rounded-lg px-4 capitalize">{t}</TabsTrigger>
               ))}
             </TabsList>
@@ -94,6 +94,7 @@ function Panel({ token, onLogout }: { token: string; onLogout: () => void }) {
             <TabsContent value="timetable"><Timetable token={token} periods={d.periods} /></TabsContent>
             <TabsContent value="blocks"><Blocks token={token} d={d} /></TabsContent>
             <TabsContent value="bookings"><Bookings token={token} d={d} /></TabsContent>
+            <TabsContent value="feedback"><FeedbackList token={token} /></TabsContent>
           </Tabs>
         )}
       </main>
@@ -138,6 +139,26 @@ function Dashboard({ d }: { d: Overview }) {
     </div>
   );
 }
+function FeedbackList({ token }: { token: string }) {
+  const fn = useServerFn(adminFeedback);
+  const q = useQuery({ queryKey: ["admin-feedback"], queryFn: async () => unwrap(await fn({ data: { token } })), refetchInterval: 60000 });
+  if (q.isError) return <p role="alert" className="text-full-strong">{errorText(q.error)}</p>;
+  if (!q.data) return <Skeleton className="h-40 w-full rounded-2xl" />;
+  if (q.data.length === 0) return <div className={card}><p className="text-muted-foreground">No feedback yet.</p></div>;
+  return (
+    <ul className="space-y-3">
+      {q.data.map((f) => (
+        <li key={f.id} className={card}>
+          <p className="whitespace-pre-wrap">{f.message}</p>
+          <p className="mt-2 text-sm text-muted-foreground tabular">
+            {new Date(f.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" })}{f.page ? ` · from ${f.page}` : ""}
+          </p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function Stat({ k, v }: { k: string; v: number }) {
   return <div className={card}><p className="text-sm text-muted-foreground">{k}</p><p className="text-3xl font-extrabold tabular">{v}</p></div>;
 }

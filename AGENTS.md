@@ -34,3 +34,7 @@ use the editor.
 - All tables are service-role only (RLS on, no policies); browser code never queries the database directly — only via `src/lib/studyspace.functions.ts`, which loads `ss.server.ts` inside handlers.
 - Booking integrity lives in SQL (`book_seat`, partial unique indexes); keep conflict handling there so concurrent taps stay safe.
 - Pure status/sort rules live in `src/lib/availability.ts` with tests in `src/test/availability.test.ts`.
+
+- The home page is public: `getAvailability` accepts an optional token (signed-out callers get rooms only); booking actions still require a signed-in student.
+- AI calls go through `@lovable.dev/ai-gateway` inside server functions only; the AI's room pick is validated by `pickSuggestion` so it can never suggest a full/blocked room.
+- Feedback is anonymous and stored service-role only; the floating Feedback button is mounted once in `__root.tsx` so it appears on every screen.

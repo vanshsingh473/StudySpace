@@ -4,14 +4,14 @@ import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { RefreshCw, School, Library, ChevronRight, MapPin, Clock, Ticket, WifiOff, CalendarOff } from "lucide-react";
 import { AppHeader } from "@/components/ss/AppHeader";
-import { RequireStudent } from "@/components/ss/RequireStudent";
+import { SuggestSpot } from "@/components/ss/SuggestSpot";
 import { StatusBadge } from "@/components/ss/StatusBadge";
 import { Countdown, hm } from "@/components/ss/Countdown";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getAvailability } from "@/lib/studyspace.functions";
 import { secondsUntil, type RoomAvailability } from "@/lib/availability";
-import { errorText, unwrap } from "@/lib/session";
+import { errorText, unwrap, useSession } from "@/lib/session";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/")({
@@ -23,14 +23,28 @@ export const Route = createFileRoute("/")({
       { property: "og:description", content: "See which rooms and library seats are free this period and book one in a tap." },
     ],
   }),
-  component: () => <RequireStudent>{(s) => <Dashboard token={s.token} />}</RequireStudent>,
+  component: Home,
 });
 
-function Dashboard({ token }: { token: string }) {
+function Home() {
+  const { ready, session } = useSession();
+  if (!ready) {
+    return (
+      <div className="mx-auto max-w-2xl space-y-3 p-4">
+        <Skeleton className="h-20 w-full rounded-xl" />
+        <Skeleton className="h-28 w-full rounded-xl" />
+        <Skeleton className="h-28 w-full rounded-xl" />
+      </div>
+    );
+  }
+  return <Dashboard token={session?.token ?? null} />;
+}
+
+function Dashboard({ token }: { token: string | null }) {
   const fetchAvail = useServerFn(getAvailability);
   const [freeOnly, setFreeOnly] = useState(false);
   const q = useQuery({
-    queryKey: ["availability"],
+    queryKey: ["availability", !!token],
     queryFn: async () => ({ ...unwrap(await fetchAvail({ data: { token } })), stamp: Date.now() }),
     refetchInterval: 15000,
     retry: 1,
@@ -44,8 +58,17 @@ function Dashboard({ token }: { token: string }) {
 
   return (
     <div className="min-h-screen pb-28">
-      <AppHeader />
+      <AppHeader signedIn={!!token} />
       <main className="mx-auto max-w-2xl space-y-4 px-4 py-4">
+        {!token && (
+          <section aria-label="Sign in to book" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-accent p-4 text-accent-foreground">
+            <p className="font-semibold">Anyone can see free rooms. Log in to book a seat.</p>
+            <div className="flex gap-2">
+              <Button asChild size="sm" variant="secondary" className="rounded-lg"><Link to="/signup">Sign up</Link></Button>
+              <Button asChild size="sm" className="rounded-lg"><Link to="/login">Log in</Link></Button>
+            </div>
+          </section>
+        )}
         {/* Period chip */}
         <section aria-label="Current period" className="rounded-2xl bg-card p-4 shadow-card">
           {!d ? (
@@ -73,6 +96,8 @@ function Dashboard({ token }: { token: string }) {
             </div>
           )}
         </section>
+
+        {d && shownPeriod && <SuggestSpot periodId={shownPeriod.id} signedIn={!!token} />}
 
         {/* Controls */}
         <div className="flex items-center gap-2">
@@ -108,7 +133,7 @@ function Dashboard({ token }: { token: string }) {
           {allFull && !freeOnly && (
             <p className="rounded-xl bg-few-soft px-4 py-3 text-sm font-medium text-few-strong">Every room is full this period. Try the next period or refresh in a few minutes.</p>
           )}
-          {shownPeriod && rooms.map((r) => <RoomCard key={r.id} room={r} periodId={shownPeriod.id} disabledBecauseBooked={!!d?.myActive && d.myActive.period.id === shownPeriod.id} />)}
+          {shownPeriod && rooms.map((r) => <RoomCard key={r.id} room={r} periodId={shownPeriod.id} signedIn={!!token} disabledBecauseBooked={!!d?.myActive && d.myActive.period.id === shownPeriod.id} />)}
         </section>
       </main>
 
@@ -131,7 +156,7 @@ function Empty({ text }: { text: string }) {
   return <div className="rounded-2xl border-2 border-dashed border-border p-8 text-center text-muted-foreground">{text}</div>;
 }
 
-function RoomCard({ room, periodId, disabledBecauseBooked }: { room: RoomAvailability; periodId: number; disabledBecauseBooked: boolean }) {
+function RoomCard({ room, periodId, signedIn, disabledBecauseBooked }: { room: RoomAvailability; periodId: number; signedIn: boolean; disabledBecauseBooked: boolean }) {
   const Icon = room.type === "library" ? Library : School;
   const disabled = room.status === "FULL" || room.status === "UNAVAILABLE";
   return (
@@ -158,6 +183,10 @@ function RoomCard({ room, periodId, disabledBecauseBooked }: { room: RoomAvailab
         </p>
         {disabled ? (
           <Button size="tap" variant="secondary" disabled>{room.status === "FULL" ? "Full" : "Unavailable"}</Button>
+        ) : !signedIn ? (
+          <Button asChild size="tap">
+            <Link to="/login">Log in to book <ChevronRight aria-hidden="true" /></Link>
+          </Button>
         ) : (
           <Button asChild size="tap">
             <Link to="/book/$roomId" params={{ roomId: String(room.id) }} search={{ period: periodId }}>

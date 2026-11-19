@@ -65,6 +65,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   ADMIN_NOT_CONFIGURED: "Admin password is not set up yet.",
   WRONG_PASSWORD: "Wrong admin password.",
   INVALID_INPUT: "Some details are missing or invalid.",
+  AI_UNAVAILABLE: "The suggestion helper is busy right now. Pick any room marked FREE below.",
+  FEEDBACK_EMPTY: "Please write a short message first.",
 };
 
 export function mapDbError(message: string | undefined): { code: string; message: string } {
@@ -79,4 +81,28 @@ export function secondsUntil(nowTime: string, endTime: string): number {
     return (h ?? 0) * 3600 + (m ?? 0) * 60 + (s || 0);
   };
   return Math.max(0, toS(endTime) - toS(nowTime));
+}
+
+// ---------- "Suggest a spot" ----------
+/** Rooms that can actually be booked right now (FREE or a few seats left). */
+export function bookableRooms(rooms: RoomAvailability[]): RoomAvailability[] {
+  return rooms.filter((r) => r.status === "FREE" || r.status === "FEW");
+}
+
+/** Keeps the AI's pick only if it is a bookable room; otherwise falls back to the room with the most free seats. */
+export function pickSuggestion(rooms: RoomAvailability[], aiRoomId: unknown): { room: RoomAvailability; fromAi: boolean } | null {
+  const ok = bookableRooms(rooms);
+  if (ok.length === 0) return null;
+  const hit = ok.find((r) => r.id === Number(aiRoomId));
+  if (hit) return { room: hit, fromAi: true };
+  const best = [...ok].sort((a, b) => b.free - a.free || a.name.localeCompare(b.name))[0]!;
+  return { room: best, fromAi: false };
+}
+
+// ---------- Feedback ----------
+export const FEEDBACK_MAX = 1000;
+/** Trims a feedback message; returns null when empty. Long messages are cut to FEEDBACK_MAX characters. */
+export function cleanFeedback(message: unknown): string | null {
+  const v = String(message ?? "").trim().slice(0, FEEDBACK_MAX);
+  return v.length > 0 ? v : null;
 }
