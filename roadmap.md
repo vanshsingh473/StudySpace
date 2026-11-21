@@ -6,3 +6,4 @@
 - [x] Public home page (see free rooms without login; login asked only to book)
 - [x] AI "Suggest a spot" button (built-in AI, with "may contain mistakes" note)
 - [x] Feedback button on every screen, saved with time, readable in Admin → Feedback
+- [x] Installable from the browser (Add to Home Screen): manifest + app icons, no service worker
